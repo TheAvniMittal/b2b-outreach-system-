@@ -1,0 +1,13 @@
+.env
+catalogues/
+__pycache__/
+*.pyc
+.pytest_cache/
+venv/
+.venv/
+*.log
+scratch/
+.system_generated/
+.DS_Store
+.idea/
+.vscode/
