@@ -31,6 +31,7 @@ def validate_rulebook_v0(
     word_count_min: int = 80,
     word_count_max: int = 120,
     rulebook_config: Optional[Any] = None,
+    company_name: Optional[str] = None,
 ) -> RulebookResult:
     """
     Validates email body against Rulebook (VISION.md §6.2, Phase 9).
@@ -186,13 +187,18 @@ def validate_rulebook_v0(
     # 7. No ALL-CAPS words
     # Check words that are >= 2 letters, all uppercase, ignoring standard single letter words like 'A' or 'I'
     all_caps_words = []
+    exempt_words = {
+        "FSSAI", "ISO", "HACCP", "APEDA", "HALAL", "GMP", "GCC", "EAN", "SKU", "MOQ",
+        "LLC", "FMCG", "B2B", "NPOP", "UAE", "FOB", "CIF", "HS", "USA", "UK"
+    }
+    if company_name:
+        for token in re.findall(r"\b[A-Za-z0-9]{2,}\b", company_name):
+            if token.isupper() or len(token) <= 5:
+                exempt_words.add(token.upper())
+
     # Tokenize word tokens
     for w in re.findall(r"\b[A-Z]{2,}\b", cleaned_text):
-        # Exclude standard acronyms/certifications if any
-        if w not in [
-            "FSSAI", "ISO", "HACCP", "APEDA", "HALAL", "GMP", "GCC", "EAN", "SKU", "MOQ",
-            "LLC", "FMCG", "B2B", "NPOP", "UAE", "FOB", "CIF", "HS", "USA", "UK"
-        ]:
+        if w not in exempt_words:
             all_caps_words.append(w)
 
     has_all_caps = len(all_caps_words) > 0

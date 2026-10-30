@@ -36,7 +36,9 @@ from app.pipeline.providers.mock_provider import MockEmailProvider
 from app.workers.a3_reply_classifier.service import classify_inbound_reply
 from app.validators.rulebook_checks import validate_rulebook_v0
 from app.validators.commercial_term_gate import validate_commercial_terms
-from app.pipeline.import_csv import import_prospects_csv
+from app.pipeline.import_csv import import_prospects_csv, hash_email
+from app.pipeline.verify_email import verify_email_stages_0_to_2
+from app.pipeline.queue import enqueue_message
 from app.pipeline.reason_formatter import format_hold_reason
 from app.pipeline.catalogue_service import save_uploaded_catalogue, ensure_catalogues_dir
 from app.pipeline.config_service import (
@@ -238,7 +240,7 @@ def list_queue(
                 status=q.status,
                 attempt_history=q.attempt_history if isinstance(q.attempt_history, list) else [],
             )
-            if (q.hold_reason or q.status in ("held", "vetoed", "waiting_for_ai"))
+            if (q.status != "sent" and (q.hold_reason or q.status in ("held", "vetoed", "waiting_for_ai")))
             else None
         )
 
@@ -865,6 +867,7 @@ def edit_and_approve_draft(
         first_name=first_name,
         word_count_min=w_min,
         word_count_max=w_max,
+        company_name=contact.company_name,
     )
 
     # Deterministic Commercial Term Gate validation (VISION.md §6.4)
@@ -1430,6 +1433,167 @@ async def import_csv_endpoint(
             {"row_num": r.row_num, "error": r.error, "data": r.data}
             for r in report.rejected_rows[:20]
         ],
+    }
+
+
+class ManualProspectCreate(BaseModel):
+    company_name: str = Field(..., min_length=1, description="Company name of prospect")
+    contact_name: str = Field(..., min_length=1, description="Contact person full name")
+    email: str = Field(..., min_length=3, description="Prospect business email")
+    segment: str = Field(..., min_length=1, description="Target customer segment")
+    designation: Optional[str] = None
+    company_domain: Optional[str] = None
+    country: Optional[str] = None
+    product_interest: Optional[str] = None
+    notes: Optional[str] = None
+    auto_enqueue: bool = True
+
+
+@router.post("/api/contacts/manual")
+def create_manual_prospect(
+    payload: ManualProspectCreate,
+    session: Session = Depends(get_db),
+):
+    """
+    Creates or updates a prospect manually entered by an operator.
+    Validates required fields, checks active segments, verifies email syntax/domain,
+    enforces suppression checks, and automatically enqueues into OutboundQueue if requested.
+    """
+    clean_email = payload.email.strip().lower()
+    if "@" not in clean_email or "." not in clean_email.split("@")[-1]:
+        raise HTTPException(status_code=400, detail="Invalid email address format.")
+
+    company_name = payload.company_name.strip()
+    contact_name = payload.contact_name.strip()
+    clean_segment = payload.segment.strip()
+
+    if not company_name:
+        raise HTTPException(status_code=400, detail="Company name is required.")
+    if not contact_name:
+        raise HTTPException(status_code=400, detail="Contact name is required.")
+
+    # Validate segment against active database segments
+    valid_segments = {s.segment for s in session.query(Segment.segment).all()}
+    if clean_segment not in valid_segments:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown segment '{clean_segment}'. Available segments: {sorted(list(valid_segments))}",
+        )
+
+    # 1. Suppression Check (SHA-256) - Strictly Refuse if Suppressed
+    e_hash = hash_email(clean_email)
+    suppression_entry = session.query(Suppression).filter_by(email_hash=e_hash).first()
+    if suppression_entry:
+        suppress_reason = suppression_entry.reason or "unsubscribed / opted out"
+        record_audit_log(
+            session,
+            actor="operator",
+            action="refuse_manual_prospect",
+            object_type="suppression",
+            object_id=str(suppression_entry.id),
+            reason=AuditReason.SUPPRESSION_ENFORCED,
+            new_state="suppressed",
+        )
+        session.commit()
+        raise HTTPException(
+            status_code=400,
+            detail=f"Refused: '{clean_email}' is on the Suppression List (Reason: {suppress_reason}). Outreach to suppressed addresses is strictly blocked.",
+        )
+
+    # 2. Email verification ladder (Stages 0-2)
+    v_res = verify_email_stages_0_to_2(clean_email)
+    v_status = v_res.status
+    v_reason = v_res.reason
+    v_stage = v_res.stage_reached
+    v_time = datetime.now(timezone.utc)
+
+    initial_status = "pending" if v_status == "valid" else "held"
+
+    # 3. Create or update contact
+    contact = session.query(Contact).filter(func.lower(Contact.email) == clean_email).first()
+    if contact:
+        contact.company_name = company_name
+        contact.contact_name = contact_name
+        contact.segment = clean_segment
+        contact.designation = payload.designation.strip() if payload.designation else None
+        contact.company_domain = payload.company_domain.strip() if payload.company_domain else None
+        contact.country = payload.country.strip() if payload.country else None
+        contact.product_interest = payload.product_interest.strip() if payload.product_interest else None
+        contact.notes = payload.notes.strip() if payload.notes else None
+        contact.verification_status = v_status
+        contact.verification_reason = v_reason
+        contact.verification_stage_reached = v_stage
+        contact.verified_at = v_time
+        action_type = "manual_update_prospect"
+    else:
+        contact = Contact(
+            company_name=company_name,
+            contact_name=contact_name,
+            email=clean_email,
+            segment=clean_segment,
+            designation=payload.designation.strip() if payload.designation else None,
+            company_domain=payload.company_domain.strip() if payload.company_domain else None,
+            country=payload.country.strip() if payload.country else None,
+            product_interest=payload.product_interest.strip() if payload.product_interest else None,
+            notes=payload.notes.strip() if payload.notes else None,
+            verification_status=v_status,
+            verification_reason=v_reason,
+            verification_stage_reached=v_stage,
+            verified_at=v_time,
+            status=initial_status,
+            retention_class="prospect_pii",
+        )
+        session.add(contact)
+        action_type = "manual_add_prospect"
+
+    session.flush()
+
+    # 4. Record Audit Log
+    record_audit_log(
+        session,
+        actor="operator",
+        action=action_type,
+        object_type="contact",
+        object_id=str(contact.id),
+        reason=AuditReason.IMPORT_VERIFIED,
+        new_state=contact.status,
+    )
+
+    # 5. Enqueue into Outbound Queue if requested
+    enqueued = False
+    queue_item_id = None
+    queue_msg = ""
+
+    if payload.auto_enqueue:
+        existing_queue = session.query(OutboundQueue).filter(
+            OutboundQueue.contact_id == contact.id,
+            OutboundQueue.status.in_(["eligible", "rendering", "pending", "held", "sent"]),
+        ).first()
+        if not existing_queue:
+            q_item = enqueue_message(session, contact_id=contact.id, campaign_step="intro")
+            enqueued = True
+            queue_item_id = q_item.id
+            queue_msg = f"Enqueued into Outbound Queue (Task #{q_item.id}, status: eligible)."
+        else:
+            queue_msg = f"Already in Outbound Queue (Task #{existing_queue.id}, status: {existing_queue.status})."
+    else:
+        queue_msg = "Saved to Contacts directory (auto-enqueue was not selected)."
+
+    session.commit()
+
+    return {
+        "success": True,
+        "contact_id": contact.id,
+        "contact_name": contact.contact_name,
+        "email": contact.email,
+        "company_name": contact.company_name,
+        "segment": contact.segment,
+        "verification_status": contact.verification_status,
+        "status": contact.status,
+        "is_suppressed": False,
+        "enqueued": enqueued,
+        "queue_item_id": queue_item_id,
+        "message": f"Prospect '{contact.contact_name}' saved successfully. {queue_msg}",
     }
 
 

@@ -66,7 +66,7 @@ HOUSE VOICE & ACTIVE RULEBOOK GUIDANCE:
 5. Paragraph structure: Exactly {max_paragraphs} paragraphs. Each paragraph MUST have 2 to {max_sentences_per_paragraph} complete sentences.
 6. Tone & punctuation:
    - Absolutely NO exclamation marks ('!').
-   - Absolutely NO ALL-CAPS words (except standard acronyms like FSSAI, ISO, APEDA, EAN, FMCG, B2B, NPOP).
+   - Absolutely NO ALL-CAPS words (except standard acronyms like FSSAI, ISO, APEDA, EAN, FMCG, B2B, NPOP, or uppercase company names/acronyms).
 7. COMMERCIAL RESTRICTION:
    - Categorically DO NOT include any specific prices, discounts, MOQ numbers, shelf-life dates, or delivery days.
    - The CTA must be an offer to share a catalogue, spec sheet, sample pack, or discussion — never a statement of terms.
@@ -82,9 +82,9 @@ OUTPUT FORMAT SPECIFICATION:
 You must return a strictly valid JSON object matching this exact schema:
 {{
   "subject": "<subject line under 90 characters>",
-  "opener": "Hi <First Name>, <1 to 2 sentences acknowledging business context>",
-  "body": "<1 to 2 paragraphs of body prose citing approved claims, each paragraph 2 to {max_sentences_per_paragraph} sentences>",
-  "cta": "<1 to 2 sentences closing offer or question>",
+  "opener": "Hi <First Name>, <exactly 2 sentences acknowledging business context>",
+  "body": "<body prose citing approved claims: if target minimum words >= 85, write exactly 2 paragraphs separated by \\n\\n, each having 2 to {max_sentences_per_paragraph} complete sentences; otherwise 1 to 2 paragraphs of 2 to {max_sentences_per_paragraph} sentences>",
+  "cta": "<exactly 2 sentences closing offer or question>",
   "cta_id": "<exact cta identifier chosen from allowed_ctas>",
   "angle": "<exact angle chosen from allowed_angles>",
   "claims_used": [<list of integer claim IDs cited>],
@@ -330,6 +330,27 @@ def draft_node(state: A2State) -> Dict[str, Any]:
         f"- Allowed Angles: {brief.campaign_config.get('allowed_angles', [])}",
         f"- Allowed CTAs: {brief.allowed_ctas}",
         f"- Forbidden Topics: {brief.forbidden_topics}",
+    ])
+
+    if t_min >= 85:
+        user_prompt_lines.extend([
+            f"- TARGET WORD COUNT: Strict range [{t_min}, {t_max}] words. Aim comfortably for ~{t_comfort} words.",
+            "- STRUCTURAL BLUEPRINT (MANDATORY TO HIT REQUIRED WORD COUNT):",
+            "  * Opener: exactly 2 complete sentences acknowledging their specific market presence and operations (~20-25 words).",
+            "  * Body: exactly 2 distinct paragraphs separated by a blank line (\\n\\n). Each paragraph MUST have 2 to 3 complete sentences expanding on product quality, traceability, packaging, and batch consistency (~65-75 words total).",
+            "  * CTA: exactly 2 complete sentences offering the next step and closing question (~18-22 words).",
+            f"  * Following this 3-section structure ensures your draft achieves ~{t_comfort} words without falling below {t_min} words.",
+        ])
+    else:
+        user_prompt_lines.extend([
+            f"- TARGET WORD COUNT: Strict range [{t_min}, {t_max}] words. Aim comfortably for ~{t_comfort} words.",
+            "- STRUCTURAL BLUEPRINT:",
+            "  * Opener: exactly 2 complete sentences acknowledging business context (~20 words).",
+            "  * Body: 1 to 2 paragraphs citing approved claims, each 2 to 3 complete sentences (~45-55 words).",
+            "  * CTA: exactly 2 complete sentences with authorized offer and question (~18-22 words).",
+        ])
+
+    user_prompt_lines.extend([
         "",
         f"CATALOGUE & APPROVED CLAIMS FOR '{brief.segment.upper()}' ONLY:",
         f"- Target Segment: {brief.segment}",
@@ -360,10 +381,11 @@ def draft_node(state: A2State) -> Dict[str, Any]:
         user_prompt_lines.extend([
             "",
             "CRITICAL REPAIR RULES:",
-            "- If expanding word count: Absolutely DO NOT use banned filler phrases (such as 'reaching out', 'synergy', 'leverage').",
-            "- Expand by adding concrete, professional details about product specifications, quality assurance, packaging, or compliance to your existing sentences.",
-            f"- Ensure each paragraph has between 2 and {max_sentences} sentences.",
-            f"- Ensure the total word count is comfortably above {t_min} words and below {t_max} words.",
+            f"- If the previous draft was under the {t_min}-word floor: ADD 1 to 2 complete, descriptive sentences to the body expanding on batch consistency, quality assurance, packaging format, or certified origin. If the body was 1 paragraph, expand it into 2 full paragraphs (2-3 sentences each) to comfortably reach ~{t_comfort} words.",
+            f"- If uppercase words in the recipient's company name/acronym ({brief.company_name}) were flagged: Addressing them by their proper company name is authorized.",
+            "- Absolutely DO NOT use banned filler phrases (such as 'reaching out', 'synergy', 'leverage').",
+            f"- Ensure each paragraph has between 2 and {max_sentences} complete sentences.",
+            f"- Ensure the total word count is comfortably above {t_min} words and below {t_max} words (aim for ~{t_comfort} words).",
             "\nPrevious draft was:\n" + state.get("draft_body", ""),
         ])
 
@@ -480,6 +502,7 @@ def rulebook_check_node(state: A2State) -> Dict[str, Any]:
         word_count_min=t_min,
         word_count_max=t_max,
         rulebook_config=state.get("rulebook_config"),
+        company_name=brief.company_name,
     )
     return {"rulebook_errors": res.errors}
 

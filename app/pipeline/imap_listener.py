@@ -162,6 +162,19 @@ def process_inbound_message(
             "reason": "Sender not found in contacts directory",
         }
 
+    # Check if this exact reply was already ingested to avoid duplicates
+    clean_snippet = body.strip().split("\nOn ")[0].strip()[:60] if body else ""
+    if clean_snippet and contact.notes and clean_snippet in contact.notes:
+        logger.info(f"Inbound reply from {clean_sender} already recorded in contact #{contact.id} notes. Skipping.")
+        return {
+            "matched": True,
+            "contact_id": contact.id,
+            "contact_name": contact.contact_name,
+            "email": contact.email,
+            "status": "already_processed",
+            "message": "Email already recorded in contact notes",
+        }
+
     # Execute A3 Classifier Pipeline
     logger.info(f"Ingesting inbound reply from contact #{contact.id} ({contact.email})")
     final_contract, actions_taken = classify_inbound_reply(
@@ -171,6 +184,13 @@ def process_inbound_message(
         subject=subject,
         headers=headers_dict,
     )
+
+    # Ensure contact notes include the prospect's actual email text for operator visibility
+    if body and body.strip():
+        display_snippet = body.strip().split("\nOn ")[0].strip()[:300]
+        prefix = f"[Inbound Reply - {getattr(final_contract.intent, 'value', str(final_contract.intent))}]:"
+        if display_snippet not in (contact.notes or ""):
+            contact.notes = f"{contact.notes or ''}\n{prefix} \"{display_snippet}\"".strip()
 
     session.commit()
 
@@ -233,7 +253,17 @@ def poll_imap_inbox(
 
         msg_ids = search_data[0].split()
         total_unseen = len(msg_ids)
-        logger.info(f"IMAP poll found {total_unseen} unseen message(s) in {email_user}")
+
+        # Fallback: if no UNSEEN messages found, check the most recent 15 messages in INBOX
+        # in case an operator opened the email in Gmail web/mobile before the poller ran.
+        if not msg_ids:
+            status_all, all_data = imap.search(None, "ALL")
+            if status_all == "OK" and all_data and all_data[0]:
+                all_ids = all_data[0].split()
+                msg_ids = all_ids[-15:]
+                logger.info(f"IMAP poll checking latest {len(msg_ids)} recent message(s) in {email_user}")
+        else:
+            logger.info(f"IMAP poll found {total_unseen} unseen message(s) in {email_user}")
 
         # Process up to limit
         for mid in msg_ids[:limit]:

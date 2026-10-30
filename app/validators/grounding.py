@@ -262,9 +262,22 @@ def validate_grounding(
 
     # --- Check (h): Catalogue consistency ---
     check_h_errors = []
+    # Generic industry terms that span multiple segments and are not proprietary single-catalogue items
+    GENERIC_INDUSTRY_TERMS = {
+        "fmcg", "b2b", "fssai", "iso", "moq", "sku", "ean", "llc", "wholesale",
+        "wholesaler", "distributor", "distribution", "retail", "supermarket",
+        "importer", "export", "exports", "food", "foods", "snacks", "mixes",
+        "packaged food", "packaged goods"
+    }
+
     # h1: Positive — every term in product_terms_used appears in this catalogue's terms
     catalogue_terms_lower = {t.lower() for t in brief.catalogue_terms}
-    invalid_product_terms = [t for t in product_terms_used if t.lower() not in catalogue_terms_lower]
+    invalid_product_terms = [
+        t for t in product_terms_used
+        if t.lower() not in catalogue_terms_lower
+        and not any(t.lower() in ct or ct in t.lower() for ct in catalogue_terms_lower)
+        and t.lower() not in GENERIC_INDUSTRY_TERMS
+    ]
     if invalid_product_terms:
         check_h_errors.append(
             f"h1 failed: product_terms_used contains terms outside catalogue: {invalid_product_terms}"
@@ -272,12 +285,6 @@ def validate_grounding(
 
     # h2: Negative — body contains no term from (other catalogues - this catalogue)
     other_terms_lower = {t.lower() for t in brief.other_catalogues_terms}
-    # Exclude generic business/compliance terms that are not proprietary catalogue items
-    GENERIC_INDUSTRY_TERMS = {
-        "fmcg", "b2b", "fssai", "iso", "moq", "sku", "ean", "llc", "wholesale",
-        "wholesaler", "distributor", "distribution", "retail", "supermarket",
-        "importer", "export", "exports"
-    }
     banned_other_terms = (other_terms_lower - catalogue_terms_lower) - GENERIC_INDUSTRY_TERMS
 
     # Pre-mask approved terms from THIS catalogue (longer phrases first) so compound terms

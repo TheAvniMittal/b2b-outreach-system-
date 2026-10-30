@@ -1071,7 +1071,10 @@
             <button class="btn btn-secondary" onclick="switchTab('review')" title="Review Held Drafts & Inbound Replies">
               <span>⚖️</span> Review Held
             </button>
-            <button class="btn btn-secondary" onclick="openCsvModal()" title="Upload a new CSV prospects list">
+            <button class="btn btn-primary" onclick="openProspectModal('manual')" title="Add a prospect manually">
+              <span>➕</span> Add Prospect
+            </button>
+            <button class="btn btn-secondary" onclick="openProspectModal('csv')" title="Upload a new CSV prospects list">
               <span>📥</span> Import CSV
             </button>
             <button class="btn btn-secondary" onclick="switchTab('tonestudio')" title="Open AI Tone Studio">
@@ -1324,7 +1327,8 @@
               <select class="select-filter" id="contacts-filter-segment">
                 <option value="">All Segments</option>
               </select>
-              <button class="btn btn-primary" id="btn-open-csv-modal">📥 Import CSV</button>
+              <button class="btn btn-primary" id="btn-open-add-prospect-modal" onclick="openProspectModal('manual')">➕ Add Prospect</button>
+              <button class="btn btn-secondary" id="btn-open-csv-modal" onclick="openProspectModal('csv')">📥 Import CSV</button>
               <button class="btn btn-secondary" id="btn-enqueue-pending-contacts" onclick="handleEnqueuePending()">⚡ Enqueue Pending</button>
             </div>
           </div>
@@ -2331,39 +2335,155 @@
     </div>
   </div>
 
-  <!-- CSV Ingestion Modal -->
+  <!-- Prospect Ingestion Modal (Manual Entry + CSV Import) -->
   <div class="modal-backdrop" id="csv-modal">
-    <div class="modal-box" style="max-width: 600px;">
+    <div class="modal-box" style="max-width: 680px;">
       <div class="modal-header">
-        <h3>📥 Import Prospects CSV</h3>
-        <button class="modal-close" id="modal-csv-close">&times;</button>
+        <h3 id="prospect-modal-title">👥 Add Prospects</h3>
+        <button class="modal-close" id="modal-csv-close" onclick="closeProspectModal()">&times;</button>
       </div>
       <div class="modal-body">
-        <div class="notice-box">
-          <strong>CSV Requirements (§18.3):</strong>
-          Requires columns: <code>company_name</code>, <code>contact_name</code>, <code>email</code>, <code>segment</code>.
-          Segment is strictly required. All imported rows are verified through the Stage 0-2 clean-list gate.
-        </div>
-
-        <div style="border: 2px dashed var(--border-strong); border-radius: 8px; padding: 24px; text-align: center; margin-bottom: 16px; background-color: rgba(255,255,255,0.01);">
-          <input type="file" id="csv-file-picker" accept=".csv" style="display: none;">
-          <div style="font-size: 32px; margin-bottom: 8px;">📄</div>
-          <div style="font-size: 13.5px; font-weight: 600; margin-bottom: 4px;" id="csv-file-name-label">Select a CSV file to upload</div>
-          <div style="font-size: 11.5px; color: var(--text-muted); margin-bottom: 14px;">UTF-8 encoded .csv files</div>
-          <button class="btn btn-secondary" id="btn-browse-csv">Browse Files</button>
-        </div>
-
-        <!-- Ingestion Result Box -->
-        <div id="csv-result-box" style="display: none; background-color: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
-          <div style="font-weight: 700; color: #34d399; font-size: 13.5px; margin-bottom: 8px;" id="csv-result-title">Import Completed</div>
-          <div style="font-size: 12.5px; color: #a7f3d0; line-height: 1.6;" id="csv-result-stats"></div>
-        </div>
-
-        <div style="display: flex; justify-content: flex-end; gap: 10px;">
-          <button class="btn btn-secondary" id="modal-csv-cancel-btn">Close</button>
-          <button class="btn btn-primary" id="modal-csv-upload-btn" disabled>
-            <span>🚀</span> Ingest Prospects
+        <!-- Sub-tabs for Manual Entry vs CSV Import -->
+        <div style="display: flex; gap: 8px; margin-bottom: 18px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 12px;">
+          <button type="button" class="btn btn-primary btn-sm" id="tab-btn-manual-prospect" onclick="switchProspectModalTab('manual')" style="display: inline-flex; align-items: center; gap: 6px;">
+            <span>✍️</span> Manual Entry
           </button>
+          <button type="button" class="btn btn-secondary btn-sm" id="tab-btn-csv-prospect" onclick="switchProspectModalTab('csv')" style="display: inline-flex; align-items: center; gap: 6px;">
+            <span>📁</span> Bulk CSV Import
+          </button>
+        </div>
+
+        <!-- ================= PANEL 1: MANUAL ENTRY ================= -->
+        <div id="panel-manual-prospect" style="display: block;">
+          <div class="notice-box" style="margin-bottom: 16px;">
+            <strong>Operator Lead Capture:</strong>
+            Enter prospect details below. The email will pass the Stage 0–2 verification ladder and suppression checks before being added to Contacts and enqueued.
+          </div>
+
+          <form id="form-manual-prospect" onsubmit="event.preventDefault(); submitManualProspect();">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px;">
+              <div>
+                <label style="display: block; font-size: 11.5px; text-transform: uppercase; color: var(--text-muted); font-weight: 700; margin-bottom: 6px;">
+                  Company Name <span style="color: #ef4444;">*</span>
+                </label>
+                <input type="text" id="manual-company-name" required class="input-search" style="width: 100%;" placeholder="e.g. Lifco International Trading LLC">
+              </div>
+              <div>
+                <label style="display: block; font-size: 11.5px; text-transform: uppercase; color: var(--text-muted); font-weight: 700; margin-bottom: 6px;">
+                  Contact Person Name <span style="color: #ef4444;">*</span>
+                </label>
+                <input type="text" id="manual-contact-name" required class="input-search" style="width: 100%;" placeholder="e.g. Rajesh Kumar">
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px;">
+              <div>
+                <label style="display: block; font-size: 11.5px; text-transform: uppercase; color: var(--text-muted); font-weight: 700; margin-bottom: 6px;">
+                  Business Email <span style="color: #ef4444;">*</span>
+                </label>
+                <input type="email" id="manual-email" required class="input-search" style="width: 100%;" placeholder="e.g. rajesh@lifco.ae">
+              </div>
+              <div>
+                <label style="display: block; font-size: 11.5px; text-transform: uppercase; color: var(--text-muted); font-weight: 700; margin-bottom: 6px;">
+                  Target Segment <span style="color: #ef4444;">*</span>
+                </label>
+                <select id="manual-segment" required class="select-filter" style="width: 100%; height: 38px;">
+                  <option value="importer_uae">UAE Food Importers (importer_uae)</option>
+                  <option value="distributor_wholesale">Wholesale &amp; Bulk Distributors (distributor_wholesale)</option>
+                  <option value="supermarket_retail">Supermarkets &amp; Retail Chains (supermarket_retail)</option>
+                  <option value="fmcg_distributor">FMCG Distributors (fmcg_distributor)</option>
+                  <option value="importer_india">Indian Spice Importers (importer_india)</option>
+                  <option value="horeca_bakery">HoReCa &amp; Commercial Bakeries (horeca_bakery)</option>
+                  <option value="organic_gourmet">Organic &amp; Gourmet Retailers (organic_gourmet)</option>
+                  <option value="wellness_gym">Wellness &amp; Health Brands (wellness_gym)</option>
+                </select>
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px;">
+              <div>
+                <label style="display: block; font-size: 11.5px; text-transform: uppercase; color: var(--text-muted); font-weight: 700; margin-bottom: 6px;">
+                  Designation / Role
+                </label>
+                <input type="text" id="manual-designation" class="input-search" style="width: 100%;" placeholder="e.g. Head of Procurement">
+              </div>
+              <div>
+                <label style="display: block; font-size: 11.5px; text-transform: uppercase; color: var(--text-muted); font-weight: 700; margin-bottom: 6px;">
+                  Country / Region
+                </label>
+                <input type="text" id="manual-country" class="input-search" style="width: 100%;" placeholder="e.g. UAE">
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px;">
+              <div>
+                <label style="display: block; font-size: 11.5px; text-transform: uppercase; color: var(--text-muted); font-weight: 700; margin-bottom: 6px;">
+                  Company Domain
+                </label>
+                <input type="text" id="manual-domain" class="input-search" style="width: 100%;" placeholder="e.g. lifco.ae">
+              </div>
+              <div>
+                <label style="display: block; font-size: 11.5px; text-transform: uppercase; color: var(--text-muted); font-weight: 700; margin-bottom: 6px;">
+                  Product Interest
+                </label>
+                <input type="text" id="manual-product-interest" class="input-search" style="width: 100%;" placeholder="e.g. Organic Cumin, Basmati, Spices">
+              </div>
+            </div>
+
+            <div style="margin-bottom: 14px;">
+              <label style="display: block; font-size: 11.5px; text-transform: uppercase; color: var(--text-muted); font-weight: 700; margin-bottom: 6px;">
+                Notes / Context for AI Personalization
+              </label>
+              <textarea id="manual-notes" rows="2" class="input-search" style="width: 100%; resize: vertical;" placeholder="e.g. Met at Gulfood Dubai. Seeking ISO/HACCP certified organic spice supplier for private labelling."></textarea>
+            </div>
+
+            <div style="margin-bottom: 16px; padding: 10px 14px; background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.25); border-radius: 6px;">
+              <label style="display: flex; align-items: center; gap: 8px; font-size: 12.5px; cursor: pointer; color: #93c5fd; font-weight: 600;">
+                <input type="checkbox" id="manual-auto-enqueue" checked style="width: 16px; height: 16px; cursor: pointer;">
+                <span>Immediately add to Outbound Queue (Campaign Step: Intro · Status: Eligible)</span>
+              </label>
+            </div>
+
+            <!-- Manual Submission Feedback Box -->
+            <div id="manual-result-box" style="display: none; border-radius: 8px; padding: 14px; margin-bottom: 16px;"></div>
+
+            <div style="display: flex; justify-content: flex-end; gap: 10px;">
+              <button type="button" class="btn btn-secondary" onclick="closeProspectModal()">Cancel</button>
+              <button type="submit" class="btn btn-primary" id="btn-submit-manual-prospect" style="display: inline-flex; align-items: center; gap: 6px;">
+                <span>💾</span> Save &amp; Enqueue Prospect
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <!-- ================= PANEL 2: CSV IMPORT ================= -->
+        <div id="panel-csv-prospect" style="display: none;">
+          <div class="notice-box">
+            <strong>CSV Requirements (§18.3):</strong>
+            Requires columns: <code>company_name</code>, <code>contact_name</code>, <code>email</code>, <code>segment</code>.
+            Segment is strictly required. All imported rows are verified through the Stage 0-2 clean-list gate.
+          </div>
+
+          <div style="border: 2px dashed var(--border-strong); border-radius: 8px; padding: 24px; text-align: center; margin-bottom: 16px; background-color: rgba(255,255,255,0.01);">
+            <input type="file" id="csv-file-picker" accept=".csv" style="display: none;">
+            <div style="font-size: 32px; margin-bottom: 8px;">📄</div>
+            <div style="font-size: 13.5px; font-weight: 600; margin-bottom: 4px;" id="csv-file-name-label">Select a CSV file to upload</div>
+            <div style="font-size: 11.5px; color: var(--text-muted); margin-bottom: 14px;">UTF-8 encoded .csv files</div>
+            <button class="btn btn-secondary" id="btn-browse-csv">Browse Files</button>
+          </div>
+
+          <!-- Ingestion Result Box -->
+          <div id="csv-result-box" style="display: none; background-color: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+            <div style="font-weight: 700; color: #34d399; font-size: 13.5px; margin-bottom: 8px;" id="csv-result-title">Import Completed</div>
+            <div style="font-size: 12.5px; color: #a7f3d0; line-height: 1.6;" id="csv-result-stats"></div>
+          </div>
+
+          <div style="display: flex; justify-content: flex-end; gap: 10px;">
+            <button class="btn btn-secondary" id="modal-csv-cancel-btn" onclick="closeProspectModal()">Close</button>
+            <button class="btn btn-primary" id="modal-csv-upload-btn" disabled>
+              <span>🚀</span> Ingest Prospects
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -3698,11 +3818,11 @@
           tbody.innerHTML = data.items.map(q => {
             const isVeto = q.is_veto || q.status === 'vetoed';
             const isHeld = q.status === 'held';
-            const isPaused = q.is_paused || q.status === 'waiting_for_ai';
-            const sBadge = isVeto ? 'badge-invalid' : (isHeld ? 'badge-held' : (isPaused ? 'badge-mono' : `badge-${q.status}`));
-            const plainLabel = escapeHtml(q.plain_label || (isVeto ? 'Skipped (Veto)' : q.status.replace('_', ' ').toUpperCase()));
-            const plainReason = q.plain_hold_reason ? escapeHtml(q.plain_hold_reason) : (q.hold_reason ? escapeHtml(q.hold_reason) : '');
-            const actionHint = q.action_hint ? escapeHtml(q.action_hint) : '';
+            const isPaused = q.status !== 'sent' && (q.is_paused || q.status === 'waiting_for_ai');
+            const sBadge = q.status === 'sent' ? 'badge-sent' : (isVeto ? 'badge-invalid' : (isHeld ? 'badge-held' : (isPaused ? 'badge-mono' : `badge-${q.status}`)));
+            const plainLabel = escapeHtml(q.status === 'sent' ? 'SENT' : (q.plain_label || (isVeto ? 'Skipped (Veto)' : q.status.replace('_', ' ').toUpperCase())));
+            const plainReason = (q.status !== 'sent' && q.plain_hold_reason) ? escapeHtml(q.plain_hold_reason) : ((q.status !== 'sent' && q.hold_reason) ? escapeHtml(q.hold_reason) : '');
+            const actionHint = (q.status !== 'sent' && q.action_hint) ? escapeHtml(q.action_hint) : '';
             const hasHistory = q.attempt_history && q.attempt_history.length > 0;
             const historyBtn = (isHeld || isVeto) && hasHistory ? `<button class="btn btn-secondary btn-sm" style="padding: 2px 7px; font-size: 10.5px; margin-top: 4px;" onclick="openAttemptHistoryModal(${q.id})">📋 Attempts (${q.attempt_history.length})</button>` : '';
 
@@ -3999,24 +4119,182 @@
       }
     });
 
-    // 2. CSV Ingestion Modal Handlers
+    // 2. Prospect Ingestion (Manual Entry & CSV Import) Handlers
     let selectedCsvContent = '';
 
-    document.getElementById('btn-open-csv-modal').addEventListener('click', () => {
-      selectedCsvContent = '';
-      document.getElementById('csv-file-picker').value = '';
-      document.getElementById('csv-file-name-label').textContent = 'Select a CSV file to upload';
-      document.getElementById('csv-result-box').style.display = 'none';
-      document.getElementById('modal-csv-upload-btn').disabled = true;
-      document.getElementById('csv-modal').classList.add('open');
-    });
+    function openProspectModal(tab = 'manual') {
+      const modal = document.getElementById('csv-modal');
+      if (!modal) return;
+      populateManualSegmentsDropdown();
+      switchProspectModalTab(tab);
+      modal.classList.add('open');
+    }
 
-    document.getElementById('modal-csv-close').addEventListener('click', () => {
-      document.getElementById('csv-modal').classList.remove('open');
-    });
-    document.getElementById('modal-csv-cancel-btn').addEventListener('click', () => {
-      document.getElementById('csv-modal').classList.remove('open');
-    });
+    function closeProspectModal() {
+      const modal = document.getElementById('csv-modal');
+      if (modal) modal.classList.remove('open');
+    }
+
+    function openCsvModal() {
+      openProspectModal('csv');
+    }
+
+    function switchProspectModalTab(tab) {
+      const isManual = tab === 'manual';
+      const manualPanel = document.getElementById('panel-manual-prospect');
+      const csvPanel = document.getElementById('panel-csv-prospect');
+      const manualBtn = document.getElementById('tab-btn-manual-prospect');
+      const csvBtn = document.getElementById('tab-btn-csv-prospect');
+      const title = document.getElementById('prospect-modal-title');
+
+      if (manualPanel) manualPanel.style.display = isManual ? 'block' : 'none';
+      if (csvPanel) csvPanel.style.display = isManual ? 'none' : 'block';
+
+      if (manualBtn) {
+        manualBtn.className = isManual ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm';
+      }
+      if (csvBtn) {
+        csvBtn.className = isManual ? 'btn btn-secondary btn-sm' : 'btn btn-primary btn-sm';
+      }
+      if (title) {
+        title.textContent = isManual ? '✍️ Add Prospect Manually' : '📥 Import Prospects CSV';
+      }
+    }
+
+    async function populateManualSegmentsDropdown() {
+      const select = document.getElementById('manual-segment');
+      if (!select) return;
+      try {
+        const res = await fetch('/api/playbooks');
+        if (!res.ok) throw new Error('Failed to load segments');
+        const data = await res.json();
+        const segments = Array.isArray(data) ? data : (data.segments || []);
+        const curVal = select.value;
+        if (segments && segments.length > 0) {
+          select.innerHTML = segments.map(p => 
+            `<option value="${escapeHtml(p.segment)}">${escapeHtml(p.name || p.segment)} (${escapeHtml(p.segment)})</option>`
+          ).join('');
+          if (curVal && segments.some(p => p.segment === curVal)) {
+            select.value = curVal;
+          }
+        }
+      } catch (e) {
+        console.warn('Error fetching segments for manual form:', e);
+      }
+    }
+
+    async function submitManualProspect() {
+      const btn = document.getElementById('btn-submit-manual-prospect');
+      const resBox = document.getElementById('manual-result-box');
+      const companyName = document.getElementById('manual-company-name')?.value.trim();
+      const contactName = document.getElementById('manual-contact-name')?.value.trim();
+      const email = document.getElementById('manual-email')?.value.trim();
+      const segment = document.getElementById('manual-segment')?.value.trim();
+      const designation = document.getElementById('manual-designation')?.value.trim();
+      const country = document.getElementById('manual-country')?.value.trim();
+      const domain = document.getElementById('manual-domain')?.value.trim();
+      const productInterest = document.getElementById('manual-product-interest')?.value.trim();
+      const notes = document.getElementById('manual-notes')?.value.trim();
+      const autoEnqueue = document.getElementById('manual-auto-enqueue')?.checked ?? true;
+
+      if (!companyName || !contactName || !email || !segment) {
+        if (resBox) {
+          resBox.style.display = 'block';
+          resBox.style.backgroundColor = 'rgba(239, 68, 68, 0.1)';
+          resBox.style.border = '1px solid rgba(239, 68, 68, 0.3)';
+          resBox.style.color = '#fca5a5';
+          resBox.innerHTML = '<strong>Validation Error:</strong> Company Name, Contact Person, Email, and Segment are required.';
+        }
+        return;
+      }
+
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span>⏳</span> Saving...';
+      }
+
+      try {
+        const res = await fetch('/api/contacts/manual', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            company_name: companyName,
+            contact_name: contactName,
+            email: email,
+            segment: segment,
+            designation: designation || null,
+            company_domain: domain || null,
+            country: country || null,
+            product_interest: productInterest || null,
+            notes: notes || null,
+            auto_enqueue: autoEnqueue,
+          }),
+        });
+
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Failed to save prospect');
+
+        if (resBox) {
+          resBox.style.display = 'block';
+          resBox.style.backgroundColor = 'rgba(16, 185, 129, 0.1)';
+          resBox.style.border = '1px solid rgba(16, 185, 129, 0.3)';
+          resBox.style.color = '#a7f3d0';
+          resBox.innerHTML = `
+            <div style="font-weight: 700; margin-bottom: 4px;">✅ Prospect Saved Successfully!</div>
+            <div style="font-size: 12px; line-height: 1.5;">
+              <strong>Contact:</strong> #${data.contact_id} · ${escapeHtml(data.contact_name)} (${escapeHtml(data.email)})<br>
+              <strong>Segment:</strong> ${escapeHtml(data.segment)} · <strong>Email Check:</strong> ${escapeHtml(data.verification_status)}<br>
+              ${data.enqueued ? `<span style="color: #34d399; font-weight: 600;">🚀 Enqueued in Outbound Queue: Task #${data.queue_item_id} (Eligible)</span>` : `<span style="color: #fcd34d;">Status: ${escapeHtml(data.status)}</span>`}
+            </div>
+          `;
+        }
+
+        showToast(`✅ Saved prospect ${data.contact_name} (${data.enqueued ? 'Enqueued in Outbound Queue' : 'Saved'})!`);
+
+        // Clear input form
+        document.getElementById('manual-company-name').value = '';
+        document.getElementById('manual-contact-name').value = '';
+        document.getElementById('manual-email').value = '';
+        document.getElementById('manual-designation').value = '';
+        document.getElementById('manual-domain').value = '';
+        document.getElementById('manual-product-interest').value = '';
+        document.getElementById('manual-notes').value = '';
+
+        // Reload data
+        loadActiveTabData(true);
+      } catch (err) {
+        if (resBox) {
+          resBox.style.display = 'block';
+          resBox.style.backgroundColor = 'rgba(239, 68, 68, 0.1)';
+          resBox.style.border = '1px solid rgba(239, 68, 68, 0.3)';
+          resBox.style.color = '#fca5a5';
+          resBox.innerHTML = `<strong>Error:</strong> ${escapeHtml(err.message)}`;
+        }
+        showToast('Error saving prospect: ' + err.message, 'error');
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = '<span>💾</span> Save &amp; Enqueue Prospect';
+        }
+      }
+    }
+
+    const btnCsvModalTrigger = document.getElementById('btn-open-csv-modal');
+    if (btnCsvModalTrigger) {
+      btnCsvModalTrigger.addEventListener('click', () => {
+        openProspectModal('csv');
+      });
+    }
+
+    const btnAddProspectTrigger = document.getElementById('btn-open-add-prospect-modal');
+    if (btnAddProspectTrigger) {
+      btnAddProspectTrigger.addEventListener('click', () => {
+        openProspectModal('manual');
+      });
+    }
+
+    document.getElementById('modal-csv-close')?.addEventListener('click', closeProspectModal);
+    document.getElementById('modal-csv-cancel-btn')?.addEventListener('click', closeProspectModal);
 
     document.getElementById('btn-browse-csv').addEventListener('click', () => {
       document.getElementById('csv-file-picker').click();
@@ -4095,10 +4373,6 @@
     }
 
     // 4. Manual Outbound Dispatch Actions (§Phase 5)
-    function openCsvModal() {
-      document.getElementById('btn-open-csv-modal')?.click();
-    }
-
     function filterQueueStatus(statusVal) {
       const sel = document.getElementById('queue-filter-status');
       if (sel) {

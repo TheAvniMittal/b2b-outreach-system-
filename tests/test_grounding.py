@@ -277,3 +277,26 @@ def test_check_h_catalogue_consistency():
     )
     assert res.per_check_results["check_h_catalogue_consistency"] is False
     assert any("dates" in err for err in res.errors)
+
+
+def test_check_h_generic_terms_exempt():
+    """Verify that cross-segment generic terms like 'snacks' or 'mixes' do not trigger false positive check (h2) collisions."""
+    brief = MessageBrief(
+        segment="wellness_gym",
+        company_name="Wellbeing Nutrition",
+        contact_name="Support Team",
+        country="India",
+        catalogue_terms=["protein snacks", "clean-label", "seed mixes"],
+        other_catalogues_terms=["namkeen", "snacks", "mixes", "dates"],
+    )
+    # Draft mentions healthy snacks and seed mixes; 'snacks' shouldn't fail h2 because it is a generic industry term
+    body = "We supply certified protein snacks and clean-label seed mixes to wellness centers."
+    res = validate_grounding(
+        body=body,
+        subject="Clean Nutrition Range",
+        claims_used=[],
+        product_terms_used=["protein snacks", "seed mixes"],
+        cta="",
+        brief=brief,
+    )
+    assert res.per_check_results["check_h_catalogue_consistency"] is True

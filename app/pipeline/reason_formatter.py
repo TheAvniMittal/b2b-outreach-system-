@@ -263,6 +263,19 @@ def format_hold_reason(
     raw_reason = (hold_reason or "").strip()
     stat_lower = (status or "").lower()
 
+    if stat_lower == "sent":
+        return {
+            "plain_label": "Sent",
+            "plain_reason": None,
+            "failed_validator_label": None,
+            "action_hint": None,
+            "is_veto": False,
+            "is_paused": False,
+            "is_dead_letter": False,
+            "category_label": "Sent",
+            "attempt_history": format_attempt_history(attempt_history),
+        }
+
     # 0. Ambiguous Delivery Reconciliation Hold
     if "sent folder" in raw_reason.lower():
         return {

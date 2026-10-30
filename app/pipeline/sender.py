@@ -101,6 +101,8 @@ def execute_send(
         send_key_record.provider_message_id = send_result.provider_message_id
         
         queue_item.status = "sent"
+        queue_item.hold_reason = None
+        queue_item.failed_validator = None
         queue_item.rendered_subject = subject
         queue_item.rendered_body = body_text
         if attachment_list and len(attachment_list) > 0:

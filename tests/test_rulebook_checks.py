@@ -81,3 +81,17 @@ def test_rulebook_no_all_caps_words():
     res = validate_rulebook_v0(body_caps, first_name="Rajesh")
     assert res.passed is False
     assert any("all-caps" in err.lower() for err in res.errors)
+
+
+def test_rulebook_company_name_all_caps_allowed():
+    # Company names like UNIBIC, MIPL, GFC should not trigger all-caps errors when whitelisted
+    body_company = VALID_BODY.replace("across India.", "across India for UNIBIC and MIPL.")
+    res = validate_rulebook_v0(body_company, first_name="Rajesh", company_name="UNIBIC Foods India Pvt Ltd")
+    # UNIBIC is allowed from company_name, but MIPL is not part of UNIBIC company_name
+    assert any("MIPL" in err for err in res.errors)
+    assert not any("UNIBIC" in err for err in res.errors)
+
+    # When company_name is MIPL, MIPL is allowed
+    body_mipl = VALID_BODY.replace("across India.", "across India for MIPL.")
+    res_mipl = validate_rulebook_v0(body_mipl, first_name="Rajesh", company_name="MIPL")
+    assert res_mipl.passed is True

@@ -126,7 +126,7 @@ def apply_mechanical_overrides(
         actions_taken["snoozed_auto_reply"] = True
 
     # 4. HUMAN REPLY HANDLING (§7.5)
-    elif contract.kind == A3Kind.HUMAN and contact.status != "suppressed":
+    elif contract.kind == A3Kind.HUMAN:
         if contract.intent == A3Intent.NOT_INTERESTED:
             # Declined: cancel sequence and mark contacted
             prev_status = contact.status
